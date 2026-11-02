@@ -44,6 +44,10 @@ select{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(
 #panel{margin:10px 0;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px}#panel h3{margin:0 0 8px;font-size:15px}#panel p{margin:0 0 10px;color:var(--mut)}#panel button{margin:10px 8px 0 0}#panel .arow button{margin:0}
 .arow{display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap}.arow span{flex:1;min-width:10rem}
 .toast{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));max-width:30rem;margin:0 auto;background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:8px;z-index:20}.toast.bad{background:var(--bad);color:#fff}
+@keyframes hl{from{background:color-mix(in srgb,var(--warn) 45%,transparent)}to{background:transparent}}
+.ti.hl,.cin.hl,.hlset{animation:hl 3s ease-out}
+@media (prefers-reduced-motion:reduce){.ti.hl,.cin.hl,.hlset{animation:none;background:color-mix(in srgb,var(--warn) 30%,transparent)}}
+.live{margin-left:12px;font-weight:600}.live.on{color:var(--go)}.live.wait{color:var(--warn)}.live.off{color:var(--bad)}
 [hidden]{display:none!important}
 </style></head><body><main>
 <div id="auth" class="card">
@@ -57,7 +61,7 @@ select{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(
 </div>
 <div id="app" hidden>
 <h1>Stint planner</h1>
-<div class="who">Signed in as <span id="who"></span></div>
+<div class="who">Signed in as <span id="who"></span> <span id="live" class="live off">○ Offline</span></div>
 <div class="topbar"><select id="raceSel" aria-label="Race"></select>
 <button id="bNew" class="p">New race</button><button id="bEdit">Edit details</button><button id="bDel">Delete race</button><button id="bArc">Archived (0)</button><button id="bRef">Refresh</button><button id="bOut">Sign out</button></div>
 <div id="meta" class="note"></div>
@@ -77,7 +81,7 @@ select{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(
 <div class="note">With a race start entered, every time is shown and entered as clock time, with race time since start in small text underneath. Without it, times are race clock.</div><div class="note">Settings belong to this race and are shared with everyone who opens it.</div></details>
 <div class="bar"><button id="exp">Expand all</button><button id="col">Collapse all</button></div>
 <div id="cars"></div>
-<div class="note">Type the pit-in time in the outlined cell of the next stint (h:mm:ss, clock time), then its pit-out time once the car leaves. Changes save to the shared database; other devices see them after Refresh (live updates come in a later step). Tap any recorded time to correct it, or × to remove a stop. Planned pit-in is the latest legal lap boundary (max stint minus buffer, moved earlier around closed windows). Window is the earliest pit-in that avoids an extra stop, to the latest.</div>
+<div class="note">Type the pit-in time in the outlined cell of the next stint (h:mm:ss, clock time), then its pit-out time once the car leaves. Changes save to the shared database and appear on other devices within a moment; a cell changed from another device flashes briefly. Tap any recorded time to correct it, or × to remove a stop. Planned pit-in is the latest legal lap boundary (max stint minus buffer, moved earlier around closed windows). Window is the earliest pit-in that avoids an extra stop, to the latest.</div>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </main>
@@ -105,19 +109,59 @@ function rebuild(){const nc=ncarVal();V.cars=[];for(let k=0;k<nc;k++){const c=ca
 function applySettings(s){const o=Object.assign({},DEF,s||{});ids.forEach(i=>{$(i).value=o[i]})}
 const hashId=()=>{const m=location.hash.match(/race=([0-9a-f-]{36})/);return m?m[1]:null};
 const setHash=id=>{try{history.replaceState(null,'',id?'#race='+id:location.pathname+location.search)}catch(e){}};
-function fillSelect(){const act=races.filter(x=>!x.deleted_at);$('raceSel').innerHTML=act.length?act.map(r=>`<option value="${r.id}">${esc(r.event_date)} · ${esc(r.name)}${r.track?' · '+esc(r.track):''}</option>`).join(''):'<option value="">No races yet</option>';$('bArc').textContent='Archived ('+races.filter(x=>x.deleted_at).length+')'}
+function fillSelect(){const act=races.filter(x=>!x.deleted_at);$('raceSel').innerHTML=act.length?act.map(r=>`<option value="${r.id}">${esc(r.event_date)} · ${esc(r.name)}${r.track?' · '+esc(r.track):''}</option>`).join(''):'<option value="">No races yet</option>';$('bArc').textContent='Archived ('+races.filter(x=>x.deleted_at).length+')';if(race&&races.includes(race)&&!race.deleted_at)$('raceSel').value=race.id}
 function renderMeta(){$('meta').innerHTML=race?esc([race.event_date,race.track,race.series].filter(Boolean).join(' · '))+(race.notes?'<br>'+esc(race.notes):''):''}
 async function ensureCars(){if(!race)return;const need=[];for(let k=0;k<ncarVal();k++)if(!carRows.some(c=>c.position===k))need.push({race_id:race.id,position:k,client_id:CID});if(!need.length)return;const r=await sb.from('cars').upsert(need,{onConflict:'race_id,position',ignoreDuplicates:true});if(r.error){toast('Could not create cars: '+r.error.message,'bad');return}const c=await sb.from('cars').select('*').eq('race_id',race.id);if(!c.error)carRows=c.data}
 async function loadRace(id){if(!id)return;const [c,s]=await Promise.all([sb.from('cars').select('*').eq('race_id',id),sb.from('stops').select('*').eq('race_id',id)]);if(c.error||s.error){toast('Could not load race: '+(c.error||s.error).message,'bad');return}if(!race||race.id!==id)return;carRows=c.data;stopRows=s.data;await ensureCars();rebuild();render()}
-async function openRace(id){flushSettings();race=races.find(x=>x.id===id)||null;carRows=[];stopRows=[];V={cars:[]};closePanel();$('raceSel').value=race?race.id:'';setHash(race&&race.id);renderMeta();$('settingsBox').hidden=!race;$('bEdit').disabled=$('bDel').disabled=!race;if(!race){render();return}applySettings(race.settings);$('cars').innerHTML='<div class="card">Loading…</div>';await loadRace(race.id)}
+async function openRace(id){unsub();setLive(race||id?'wait':'off');flushSettings();race=races.find(x=>x.id===id)||null;carRows=[];stopRows=[];V={cars:[]};closePanel();$('raceSel').value=race?race.id:'';setHash(race&&race.id);renderMeta();$('settingsBox').hidden=!race;$('bEdit').disabled=$('bDel').disabled=!race;if(!race){render();return}applySettings(race.settings);$('cars').innerHTML='<div class="card">Loading…</div>';await loadRace(race.id);subscribe()}
 async function loadRaces(selectId){const r=await sb.from('races').select('*').order('event_date',{ascending:false}).order('created_at',{ascending:false});if(r.error){toast('Could not load races: '+r.error.message,'bad');return}races=r.data;fillSelect();const act=races.filter(x=>!x.deleted_at),want=selectId||hashId();await openRace((act.find(x=>x.id===want)||act[0]||{}).id||null)}
 function onSettings(){render();if(!race)return;pendS={id:race.id,settings:Object.fromEntries(ids.map(i=>[i,$(i).value]))};clearTimeout(sT);sT=setTimeout(flushSettings,600)}
 function flushSettings(){clearTimeout(sT);if(!pendS)return;const p=pendS;pendS=null;const r=races.find(x=>x.id===p.id);if(r)r.settings=p.settings;queue(async()=>ok(await sb.from('races').update({settings:p.settings,client_id:CID}).eq('id',p.id)),'Saving settings');if(race&&race.id===p.id)ensureCars().then(()=>{rebuild();render()})}
 ids.forEach(i=>$(i).addEventListener('input',onSettings));
 
+/* ---- live updates ---- */
+let ch=null,quiet=false;const HL=new Map();
+const hlOn=key=>{const t=HL.get(key);return !!t&&Date.now()<t+3000};
+const hlCls=key=>hlOn(key)?' hl':'';
+const hlSty=key=>hlOn(key)?` style="animation-delay:-${Date.now()-HL.get(key)}ms"`:'';
+function mark(key){if(quiet)return;HL.set(key,Date.now());setTimeout(()=>{const a=document.activeElement;if(!(a&&a.classList&&(a.classList.contains('ti')||a.classList.contains('cin'))))render()},3100)}
+function setLive(s){const el=$('live');if(!el)return;el.className='live '+s;el.textContent=s==='on'?'● Live':s==='wait'?'● Connecting…':'○ Offline'}
+function unsub(){if(ch){try{sb.removeChannel(ch)}catch(e){}ch=null}}
+const carPos=id=>{const c=carRows.find(x=>x.id===id);return c?c.position:-1};
+function sortRaces(){races.sort((a,b)=>a.event_date<b.event_date?1:a.event_date>b.event_date?-1:(a.created_at<b.created_at?1:-1))}
+function onStop(p){const t=p.eventType,n=p.new||{};
+if(t==='DELETE'){const id=(p.old||{}).id,row=stopRows.find(s=>s.id===id);if(!row)return;stopRows=stopRows.filter(s=>s.id!==id);toast('A stop was removed on another device.');rebuild();render();return}
+if(n.client_id===CID||!race||n.race_id!==race.id||n.stint<0)return;
+const k=carPos(n.car_id),row=stopRows.find(s=>s.id===n.id);
+if(!row){stopRows.push(Object.assign({},n));mark(k+':'+n.stint+':i');if(n.pit_out!=null)mark(k+':'+n.stint+':o')}
+else{if(row.pit_in!==n.pit_in)mark(k+':'+n.stint+':i');if((row.pit_out==null?null:row.pit_out)!==(n.pit_out==null?null:n.pit_out))mark(k+':'+n.stint+':o');Object.assign(row,n)}
+rebuild();render()}
+function onCar(p){const t=p.eventType,n=p.new||{};
+if(t==='DELETE'){const id=(p.old||{}).id;if(!carRows.some(c=>c.id===id))return;carRows=carRows.filter(c=>c.id!==id);stopRows=stopRows.filter(s=>s.car_id!==id);rebuild();render();return}
+if(n.client_id===CID||!race||n.race_id!==race.id)return;
+const c=carRows.find(x=>x.id===n.id);
+if(!c)carRows.push(Object.assign({},n));else{if((c.car_number||'')!==(n.car_number||''))mark('c:'+n.position);Object.assign(c,n)}
+rebuild();render()}
+function applyRemoteSettings(s){if(pendS)return;const o=Object.assign({},DEF,s||{});let changed=false;
+ids.forEach(i=>{const el=$(i);if(document.activeElement===el||el.value===o[i])return;el.value=o[i];changed=true;if(!quiet){el.classList.add('hlset');setTimeout(()=>el.classList.remove('hlset'),3000)}});
+if(changed){rebuild();render();ensureCars().then(()=>{rebuild();render()})}}
+function onRaceEv(p){const t=p.eventType;
+if(t==='DELETE'){const id=(p.old||{}).id;if(!races.some(r=>r.id===id))return;const cur=race&&race.id===id;races=races.filter(r=>r.id!==id);fillSelect();if(cur){toast('This race was deleted on another device.');openRace((races.filter(x=>!x.deleted_at)[0]||{}).id||null)}return}
+const n=p.new;if(!n||n.client_id===CID)return;
+const i=races.findIndex(r=>r.id===n.id);if(i<0)races.push(Object.assign({},n));else Object.assign(races[i],n);
+sortRaces();fillSelect();
+if(race&&race.id===n.id){if(n.deleted_at){toast('This race was moved to Archived on another device.');loadRaces(null);return}renderMeta();applyRemoteSettings(n.settings)}}
+function resync(){if(!race)return;const id=race.id;quiet=true;Q=Q.then(()=>loadRace(id)).catch(()=>{}).finally(()=>{setTimeout(()=>{quiet=false},400)})}
+function subscribe(){unsub();if(!race)return;const id=race.id,f='race_id=eq.'+id,e=(ev,table,fn,filter)=>({ev,table,fn,filter});
+let c=sb.channel('race-'+id+'-'+CID.slice(0,8));
+[['INSERT','stops',onStop,f],['UPDATE','stops',onStop,f],['DELETE','stops',onStop],['INSERT','cars',onCar,f],['UPDATE','cars',onCar,f],['DELETE','cars',onCar],['*','races',onRaceEv]].forEach(([ev,table,fn,filter])=>{const cfg={event:ev,schema:'public',table};if(filter)cfg.filter=filter;c=c.on('postgres_changes',cfg,fn)});
+ch=c.subscribe(st=>{if(!race||race.id!==id)return;if(st==='SUBSCRIBED'){setLive('on');resync()}else if(st==='CHANNEL_ERROR'||st==='TIMED_OUT')setLive('wait');else if(st==='CLOSED')setLive('off')})}
+window.addEventListener('offline',()=>setLive('off'));
+window.addEventListener('online',()=>{if(race)setLive('wait')});
+
 /* ---- sign-in ---- */
 const say=(t,cls='')=>{$('amsg').textContent=t;$('amsg').className='msg '+cls};
-function showAuth(){user=null;isOwner=false;race=null;races=[];$('auth').hidden=false;$('app').hidden=true}
+function showAuth(){unsub();setLive('off');user=null;isOwner=false;race=null;races=[];$('auth').hidden=false;$('app').hidden=true}
 async function start(){$('auth').hidden=true;$('app').hidden=false;$('who').textContent=user.email||'';try{const r=await sb.rpc('is_owner');isOwner=!!r.data}catch(e){isOwner=false}await loadRaces()}
 sb.auth.onAuthStateChange((ev,s)=>{const u=s&&s.user;if((u&&u.id)===(user&&user.id))return;if(u){user=u;start()}else showAuth()});
 $('send').onclick=async()=>{const email=$('email').value.trim();if(!email){say('Enter your email first.','bad');return}$('send').disabled=true;say('Sending…');const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});$('send').disabled=false;if(error)say(error.message,'bad');else say('Check your email for the sign-in link, then open it on this device.','ok')};
@@ -185,7 +229,7 @@ else if(w.N==0){card('Stops remaining',0,'Runs to the flag');card('Latest pit-in
 else{card('Stops remaining',w.N,'Total in plan '+(n+w.N));card('Latest pit-in call',cs(w.latest,1),'Stint '+(n+1)+' · '+drv(n));card('Earliest without extra stop',cs(w.earliest,1),'Earlier adds a stop');sum=w.N+' stop'+(w.N>1?'s':'')+' left · latest call '+cs(w.latest,1)+' · earliest '+cs(w.earliest,1)}
 let rows='';const pill=(s,e)=>c.hp&&s<c.pr&&e>=c.pr?'<span class="pill">pause</span>':'';
 const sub=v=>c.ok?(clk(v,c).d>1?'Day '+clk(v,c).d+' · ':'')+'race '+fmt(v):'';
-const ci=(j,f,v,ph,ref,nx)=>`<input class="ti${nx?' nx':''}" data-c="${k}" data-j="${j}" data-f="${f}" data-ref="${v!=null?v:ref}" value="${v==null?'':(c.ok?clk(v,c,1).t:fmt(v,1))}" placeholder="${ph}" aria-label="Car ${k+1} stint ${j+1} pit-${f=='i'?'in':'out'}">${v!=null?'<small>'+sub(v)+'</small>':''}`;
+const ci=(j,f,v,ph,ref,nx)=>`<input class="ti${nx?' nx':''}${hlCls(k+':'+j+':'+f)}"${hlSty(k+':'+j+':'+f)} data-c="${k}" data-j="${j}" data-f="${f}" data-ref="${v!=null?v:ref}" value="${v==null?'':(c.ok?clk(v,c,1).t:fmt(v,1))}" placeholder="${ph}" aria-label="Car ${k+1} stint ${j+1} pit-${f=='i'?'in':'out'}">${v!=null?'<small>'+sub(v)+'</small>':''}`;
 A.forEach((a,j)=>{const s=j?A[j-1].o:0,sh=a.o!=null&&a.o-a.i<c.D-1e-6,bd=s!=null&&a.i<s,ex=exit(a.i,c),pit=a.o==null;
 rows+=`<tr class="${pit?'cur':'done'}"><td>${j+1}</td><td>${drv(j)}</td><td>${s!=null?tc(s,c):'—'}</td><td>${ci(j,'i',a.i,'',a.i)}</td><td class="${bd?'bad':''}">${fmt(a.i-s)}${pill(s,a.i)}</td><td>${ci(j,'o',a.o,cs(ex,1),ex,pit)}${sh?'<small class="bad">short by '+fmt(c.D-(a.o-a.i),1)+'</small>':''}</td><td><button class="x" data-c="${k}" data-del="${j}" title="Delete this stop" aria-label="Delete car ${k+1} stop ${j+1}">×</button></td></tr>`});
 pr.o.forEach((r,i)=>{const j=n+i,nx=i==0&&!inPit,w2=pitWindow(r.s,r.s,c);
@@ -197,7 +241,7 @@ function render(){if(!race){$('cars').innerHTML='<div class="card">Create a race
 if(![c.T,c.M,c.D,c.L].every(isFinite)||c.L<=0){$('cars').innerHTML='<div class="card">Fill in race length, max stint, min stop and lap time.</div>';return}
 const nc=ncarVal();rebuild();
 const cs=(r,sec)=>{if(!c.ok)return fmt(r,sec);const k=clk(r,c,sec);return(k.d>1?'D'+k.d+' ':'')+k.t};
-const esc=s=>String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));let out='';for(let k=0;k<nc;k++){const v=carView(k,c,cs),nm=V.cars[k].num||'',ttl=nm?(/^#/.test(nm)?nm:'#'+nm):'Car '+(k+1);out+=`<details class="car" data-k="${k}"${S.open[k]===false?'':' open'}><summary>${esc(ttl)}<span>${v.sum}</span></summary><div class="hd"><label class="cn">Car number<input class="cin" data-c="${k}" value="${esc(nm)}" placeholder="e.g. 7" maxlength="8"></label><button class="rst${arm===k?' armed':''}" data-rst="${k}">${arm===k?'Tap again to clear this car':'Reset car'}</button></div><div class="cards">${v.cards}</div>${v.table}</details>`}
+const esc=s=>String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));let out='';for(let k=0;k<nc;k++){const v=carView(k,c,cs),nm=V.cars[k].num||'',ttl=nm?(/^#/.test(nm)?nm:'#'+nm):'Car '+(k+1);out+=`<details class="car" data-k="${k}"${S.open[k]===false?'':' open'}><summary>${esc(ttl)}<span>${v.sum}</span></summary><div class="hd"><label class="cn">Car number<input class="cin${hlCls('c:'+k)}"${hlSty('c:'+k)} data-c="${k}" value="${esc(nm)}" placeholder="e.g. 7" maxlength="8"></label><button class="rst${arm===k?' armed':''}" data-rst="${k}">${arm===k?'Tap again to clear this car':'Reset car'}</button></div><div class="cards">${v.cards}</div>${v.table}</details>`}
 $('cars').innerHTML=out;saveOpen()}
 
 </script></body></html>
