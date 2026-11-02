@@ -39,7 +39,7 @@ tr.done td.bad,td small.bad{color:var(--bad)}
 select{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:8px;min-height:40px;max-width:100%}
 .topbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 6px}.topbar button{margin:0;padding:8px 12px;min-height:40px}
 .who{font-size:12px;color:var(--mut);margin:0 0 8px}
-#auth{max-width:30rem;margin:40px auto}#auth h1{margin-bottom:4px}#auth p{margin:0 0 14px;color:var(--mut)}#auth button{margin-top:10px}
+#auth{max-width:30rem;margin:40px auto}#auth h1{margin-bottom:4px}#auth p{margin:0 0 14px;color:var(--mut)}#auth button{margin-top:10px}.or{font-size:13px;color:var(--mut);margin:14px 0 8px;text-align:center}
 .msg{margin-top:12px;font-size:14px;min-height:1.4em}.msg.bad{color:var(--bad)}.msg.ok{color:var(--go)}
 #panel{margin:10px 0;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px}#panel h3{margin:0 0 8px;font-size:15px}#panel p{margin:0 0 10px;color:var(--mut)}#panel button{margin:10px 8px 0 0}#panel .arow button{margin:0}
 .arow{display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap}.arow span{flex:1;min-width:10rem}
@@ -48,6 +48,8 @@ select{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(
 </style></head><body><main>
 <div id="auth" class="card">
 <h1>Stint planner</h1><p>online.v1 · sign in with an emailed link</p>
+<button id="goog" class="p" style="width:100%;margin-top:0">Continue with Google</button>
+<div class="or">or use an emailed link</div>
 <label for="email" style="font-size:13px;color:var(--mut)">Email</label>
 <input id="email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com">
 <button id="send" class="p">Email me a sign-in link</button>
@@ -119,6 +121,7 @@ function showAuth(){user=null;isOwner=false;race=null;races=[];$('auth').hidden=
 async function start(){$('auth').hidden=true;$('app').hidden=false;$('who').textContent=user.email||'';try{const r=await sb.rpc('is_owner');isOwner=!!r.data}catch(e){isOwner=false}await loadRaces()}
 sb.auth.onAuthStateChange((ev,s)=>{const u=s&&s.user;if((u&&u.id)===(user&&user.id))return;if(u){user=u;start()}else showAuth()});
 $('send').onclick=async()=>{const email=$('email').value.trim();if(!email){say('Enter your email first.','bad');return}$('send').disabled=true;say('Sending…');const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});$('send').disabled=false;if(error)say(error.message,'bad');else say('Check your email for the sign-in link, then open it on this device.','ok')};
+$('goog').onclick=async()=>{say('Opening Google…');const {error}=await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+location.pathname}});if(error)say(error.message,'bad')};
 $('bOut').onclick=()=>sb.auth.signOut();
 
 /* ---- race panels ---- */
